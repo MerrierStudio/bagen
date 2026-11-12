@@ -1,5 +1,14 @@
 (function (scope) {
   'use strict';
+  const TAUNTS = Object.freeze(['我这可是顶级老根儿，你的呢？', '挑根结实的啊！', '你确定就带这几根？', '刚才不算，这回再来！', '怎么样，还接着拔不？']);
+  function enterSelection(s, random) {
+    const m = s.active, pool = [0, 1, 2];
+    if (m.lastRoundWinner !== null) pool.push(m.lastRoundWinner === 1 ? 3 : 4);
+    const choices = pool.filter(id => id !== m.tauntID);
+    const roll = random(); requireThat(Number.isFinite(roll) && roll >= 0 && roll < 1);
+    m.tauntID = choices[Math.floor(roll * choices.length)];
+    m.phase = 'selection'; lockAI(s);
+  }
   const BASE = [50, 70, 90], RESISTANCE = [115, 100, 85];
   const TREATMENTS = { none: { bonus: 0, wear: 65, order: 2 }, salt: { bonus: 10, wear: 100, order: 0 }, shoe: { bonus: 18, wear: 150, order: 1 } };
   const validTreatment = choice => typeof choice === 'string' && Object.prototype.hasOwnProperty.call(TREATMENTS, choice);
@@ -35,9 +44,44 @@
     requireThat(Number.isSafeInteger(numerator), '磨损输入超出整数精度范围');
     return Math.max(1, Math.floor(numerator / 1000000));
   }
+  // Missing legacy memory uses public wins only; never infer wear from real ability.
+  function estimatedWear(r) { return r.estimatedWear == null ? r.wins * damage(70, r.rarity, r.treatment) : r.estimatedWear; }
+  function estimate(r) { return Math.max(1, BASE[r.rarity] + TREATMENTS[r.treatment].bonus - estimatedWear(r)); }
+  function rankEstimated(roots, rng) {
+    const keyed = roots.map(r => ({ root: r, key: rng.unit() }));
+    return stableSort(keyed, (a, b) => estimate(b.root) - estimate(a.root) || a.key - b.key).map(item => item.root);
+  }
+  function chooseBest(roots, rng) {
+    const best = Math.max.apply(null, roots.map(estimate)), tied = roots.filter(r => estimate(r) === best);
+    requireThat(tied.length > 0); return tied[rng.integer(0, tied.length - 1)].id;
+  }
+  function chooseTeam(fresh, old, rng) {
+    requireThat(fresh.length === 3 && unique(fresh.concat(old).map(r => r.id)));
+    // Randomize equal ranks once. Only eight fresh subsets; old prefixes are optimal.
+    const ranked = rankEstimated(old, rng);
+    const newRanked = rankEstimated(fresh, rng);
+    let best = -1, total = 0, chosen = null;
+    for (let mask = 0; mask < 8; mask++) {
+      const selected = newRanked.filter((r, i) => mask & (1 << i)), k = 3 - selected.length;
+      if (ranked.length < k) continue;
+      const prior = ranked.slice(0, k), score = selected.concat(prior).reduce((sum, r) => sum + estimate(r), 0) + (selected.length ? 18 : 0) + (selected.length > 1 ? 10 : 0);
+      let ways = 1;
+      if (k) {
+        const boundary = estimate(prior[k - 1]), above = ranked.filter(r => estimate(r) > boundary).length;
+        const ties = ranked.filter(r => estimate(r) === boundary).length, needed = k - above;
+        for (let j = 1; j <= needed; j++) ways = ways * (ties - j + 1) / j;
+      }
+      if (score < best) continue;
+      if (score > best) { best = score; total = 0; }
+      total += ways;
+      if (rng.unit() < ways / total) chosen = { roots: selected.concat(prior), fresh: selected, score: score };
+    }
+    return chosen;
+  }
   function validateRoot(r) {
     requireThat(r && typeof r.id === 'string' && r.id.length > 0 && ['player', 'ai'].includes(r.owner) &&
       Number.isInteger(r.rarity) && r.rarity >= 0 && r.rarity <= 2 && validTreatment(r.treatment), '根记录无法识别');
+    requireThat(r.estimatedWear == null || (Number.isSafeInteger(r.estimatedWear) && r.estimatedWear >= 0), '估计损耗无法识别');
     ['rawAbility', 'initialAbility', 'currentAbility'].forEach(k => requireThat(Number.isSafeInteger(r[k]) && r[k] > 0));
     ['wins', 'streak', 'bestStreak'].forEach(k => requireThat(Number.isSafeInteger(r[k]) && r[k] >= 0));
     ['preparationFinalized', 'hasEnteredArchive', 'broken'].forEach(k => requireThat(typeof r[k] === 'boolean'));
@@ -61,6 +105,7 @@
     const winner = tieWinner === null ? (powers[0] > powers[1] ? 0 : 1) : tieWinner;
     const wear = damage(before[1 - winner].currentAbility, before[winner].rarity, before[winner].treatment), after = copy(before);
     const won = after[winner], lost = after[1 - winner];
+    won.estimatedWear = estimatedWear(won) + damage(70, won.rarity, won.treatment);
     won.currentAbility = Math.max(1, won.currentAbility - wear); won.wins++; won.streak++; won.bestStreak = Math.max(won.bestStreak, won.streak);
     lost.broken = true; lost.brokenAt = now; lost.streak = 0;
     return { id: id, before: before, after: after, noise: noise, winner: winner, tieWinner: tieWinner, damage: wear };
@@ -106,16 +151,14 @@
     const id = newID(s, 'root');
     let visual = 0; for (let i = 0; i < id.length; i++) visual = (visual * 31 + id.charCodeAt(i)) & 255;
     return { id: id, owner: owner, rarity: rarity, rawAbility: ability, initialAbility: ability, currentAbility: ability,
-      treatment: 'none', preparationFinalized: false, hasEnteredArchive: false, wins: 0, streak: 0, bestStreak: 0, broken: false,
+      estimatedWear: 0, treatment: 'none', preparationFinalized: false, hasEnteredArchive: false, wins: 0, streak: 0, bestStreak: 0, broken: false,
       createdAt: now, brokenAt: null, createdMatchID: s.active.id, appearanceSeed: visual };
   }
   function lockAI(s) {
     const m = s.active;
     if (!m || m.phase !== 'selection' || m.selections[0] !== null) return;
-    const ids = stableSort(m.roster[0].filter(id => !lookup(s, id).broken), (a, b) => lookup(s, b).currentAbility - lookup(s, a).currentAbility);
-    requireThat(ids.length > 0); const rng = new SeededRandom(s.rngHex), roll = rng.unit(); s.rngHex = rng.hex;
-    const index = ids.length === 1 ? 0 : ids.length === 2 ? (roll < 5 / 7 ? 0 : 1) : (roll < 0.5 ? 0 : roll < 0.8 ? 1 : 2);
-    m.selections[0] = ids[index];
+    const roots = m.roster[0].map(id => lookup(s, id)).filter(r => !r.broken), rng = new SeededRandom(s.rngHex);
+    m.selections[0] = chooseBest(roots, rng); s.rngHex = rng.hex;
   }
   function chooseTreatment(s, id, choice) {
     const m = s.active, r = lookup(s, id);
@@ -123,14 +166,16 @@
     requireThat(choice === 'none' || !m.roster[1].some(other => other !== id && m.choices[other] === choice));
     m.workingRoots[m.workingRoots.findIndex(r => r.id === id)] = prepare(r, choice); m.choices[id] = choice;
   }
-  function finishPreparation(s, now) {
+  function finishPreparation(s, now, tauntRandom) {
     const m = s.active; requireThat(m && m.phase === 'treatment');
     m.roster[1].forEach(id => { if (m.newIDs.includes(id)) { const i = m.workingRoots.findIndex(r => r.id === id); m.workingRoots[i] = prepare(m.workingRoots[i], m.choices[id] || 'none'); } });
-    // Native AI retains the first three survivors; fresh additions get shoe then salt by ability.
-    while (m.roster[0].length < 3) { const r = draw(s, 'ai', now); m.workingRoots.push(r); m.roster[0].push(r.id); m.newIDs.push(r.id); m.candidates[0].push(r.id); }
-    const fresh = stableSort(m.roster[0].filter(id => m.newIDs.includes(id)), (a, b) => lookup(s, b).currentAbility - lookup(s, a).currentAbility);
-    fresh.forEach((id, i) => { const index = m.workingRoots.findIndex(r => r.id === id); m.workingRoots[index] = prepare(m.workingRoots[index], i === 0 ? 'shoe' : i === 1 ? 'salt' : 'none'); if (i < 2) m.choices[id] = i === 0 ? 'shoe' : 'salt'; });
-    m.phase = 'selection'; lockAI(s);
+    const rng = new SeededRandom(s.rngHex), team = chooseTeam(m.candidates[0].map(id => lookup(s, id)), available(m.workingRoots, 'ai'), rng);
+    s.rngHex = rng.hex; m.roster[0] = team.roots.map(r => r.id);
+    team.fresh.forEach((r, i) => {
+      const choice = i === 0 ? 'shoe' : i === 1 ? 'salt' : 'none';
+      m.workingRoots[m.workingRoots.findIndex(root => root.id === r.id)] = prepare(r, choice); m.choices[r.id] = choice;
+    });
+    enterSelection(s, tauntRandom);
   }
   function mergedRoots(s) {
     const roots = copy(s.roots), m = s.active, ids = m.roster[0].concat(m.roster[1]);
@@ -142,7 +187,7 @@
     requireThat(m.score.includes(2)); const selected = m.roster[0].concat(m.roster[1]);
     m.workingRoots.forEach(r => {
       if (!selected.includes(r.id)) return;
-      if (m.newIDs.includes(r.id) && !m.participants.includes(r.id) && !r.broken) r.currentAbility = Math.max(1, r.currentAbility - 2);
+      if (m.newIDs.includes(r.id) && !m.participants.includes(r.id) && !r.broken) { r.estimatedWear = estimatedWear(r) + 2; r.currentAbility = Math.max(1, r.currentAbility - 2); }
       r.hasEnteredArchive = true;
     });
     m.settlementApplied = true; m.phase = 'finished';
@@ -165,6 +210,8 @@
   class Game {
     constructor(options) {
       options = options || {}; this._revision = 0; this._now = options.now || Date.now;
+      // Presentation draws must never consume the battle RNG.
+      this._tauntRandom = options.tauntRandom || Math.random;
       const archive = options.archive;
       if (archive) {
         requireThat(archive.format === 'bagen-web' && archive.schemaVersion === 1 && typeof archive.commitID === 'string' && Array.isArray(archive.roots) && archive.roots.every(r => r.hasEnteredArchive), '存档版本无法识别，请保留原记录');
@@ -204,13 +251,14 @@
           case 'begin':
             requireThat(!m || m.phase === 'finished');
             s.paused = false; s.pauseReason = null; s.inputEpoch++;
-            s.active = { id: newID(s, 'match'), workingRoots: copy(s.roots), candidates: [[], []], roster: [available(s.roots, 'ai').slice(0, 3).map(r => r.id), []],
-              phase: 'roster', score: [0, 0], choices: {}, selections: [null, null], newIDs: [], participants: [], applied: [], roundWins: {}, pending: null, settlementApplied: false };
+            s.active = { id: newID(s, 'match'), workingRoots: copy(s.roots), candidates: [[], []], roster: [[], []],
+              lastRoundWinner: null, tauntID: null, phase: 'roster', score: [0, 0], choices: {}, selections: [null, null], newIDs: [], participants: [], applied: [], roundWins: {}, pending: null, settlementApplied: false };
             break;
           case 'drawCandidates':
             requireThat(m && m.phase === 'roster'); if (m.candidates[1].length) break;
             requireThat(m.roster[1].length === 0);
             for (let i = 0; i < 3; i++) { const r = draw(s, 'player', now); m.workingRoots.push(r); m.candidates[1].push(r.id); m.newIDs.push(r.id); }
+            for (let i = 0; i < 3; i++) { const r = draw(s, 'ai', now); m.workingRoots.push(r); m.candidates[0].push(r.id); m.newIDs.push(r.id); }
             m.roster[1] = m.candidates[1].slice(); break;
           case 'setPlayerRoster': {
             const ids = action.ids; requireThat(m && m.phase === 'roster' && Array.isArray(ids) && ids.length <= 3 && unique(ids));
@@ -219,9 +267,9 @@
           }
           case 'finishRoster':
             requireThat(m && m.phase === 'roster' && m.roster[1].length === 3); m.phase = 'treatment';
-            if (!m.roster[1].some(id => m.newIDs.includes(id))) finishPreparation(s, now); break;
+            if (!m.roster[1].some(id => m.newIDs.includes(id))) finishPreparation(s, now, this._tauntRandom); break;
           case 'chooseTreatment': chooseTreatment(s, action.id, action.choice); break;
-          case 'finishPreparation': finishPreparation(s, now); break;
+          case 'finishPreparation': finishPreparation(s, now, this._tauntRandom); break;
           case 'lockAI': lockAI(s); break;
           case 'select': {
             requireThat(m && m.phase === 'selection' && m.selections[1] === null && m.roster[1].includes(action.id) && !lookup(s, action.id).broken);
@@ -235,10 +283,10 @@
             r.after.forEach(updated => { m.workingRoots[m.workingRoots.findIndex(root => root.id === updated.id)] = copy(updated); });
             const winnerID = r.before[r.winner].id; m.roundWins[winnerID] = (m.roundWins[winnerID] || 0) + 1;
             m.applied.push(r.id); r.before.forEach(root => { if (!m.participants.includes(root.id)) m.participants.push(root.id); });
-            m.score[r.winner]++; s.inputEpoch++; m.phase = 'roundResult'; if (m.score.includes(2)) finishMatch(s); break;
+            m.lastRoundWinner = r.winner; m.score[r.winner]++; s.inputEpoch++; m.phase = 'roundResult'; if (m.score.includes(2)) finishMatch(s); break;
           }
           case 'nextRound':
-            requireThat(m && m.phase === 'roundResult'); s.inputEpoch++; m.selections = [null, null]; m.pending = null; m.phase = 'selection'; lockAI(s); break;
+            requireThat(m && m.phase === 'roundResult'); s.inputEpoch++; m.selections = [null, null]; m.pending = null; enterSelection(s, this._tauntRandom); break;
           default: throw Error('未知游戏操作');
         }
       }
@@ -270,5 +318,5 @@
       if (this.input.phase === 'finished') this.game.dispatch({ type: 'settleRound', matchID: this.matchID, roundID: this.roundID });
     }
   }
-  scope.BagenRules = { Game: Game, BattleSession: BattleSession, MatchClock: MatchClock, SeededRandom: SeededRandom, damage: damage, prepare: prepare, resolve: resolve, collection: collection, summary: summary };
+  scope.BagenRules = { taunts: TAUNTS, Game: Game, BattleSession: BattleSession, MatchClock: MatchClock, SeededRandom: SeededRandom, damage: damage, prepare: prepare, resolve: resolve, collection: collection, summary: summary, estimate: estimate, estimatedWear: estimatedWear, chooseTeam: chooseTeam, chooseBest: chooseBest };
 })(typeof window === 'undefined' ? globalThis : window);

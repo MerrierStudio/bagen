@@ -6,3 +6,6 @@ html{font-size:100%;font:-apple-system-body}
 .treatment-ghost{position:fixed;z-index:6;pointer-events:none}.treatment-ghost .sprite{height:100%;margin:0}
 
 .home{overflow-y:auto}.home>*{flex-shrink:0}.collection-grid{grid-template-columns:repeat(auto-fill,minmax(6.25rem,1fr))}
+
+/* The canvas outline and this editable text share selectionLayout geometry. */
+.opponent-taunt{position:absolute;display:flex;align-items:center;justify-content:center;margin:0;line-height:1.45;text-align:center;white-space:pre-line;pointer-events:none}
