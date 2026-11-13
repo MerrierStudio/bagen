@@ -1,9 +1,9 @@
 (function (scope) {
   'use strict';
-  const TAUNTS = Object.freeze(['我这可是顶级老根儿，你的呢？', '挑根结实的啊！', '你确定就带这几根？', '刚才不算，这回再来！', '怎么样，还接着拔不？']);
+  const TAUNTS = Object.freeze(['我这可是顶级老根儿，你的呢？', '挑根结实的啊！', '刚才不算，这回再来！', '怎么样，还接着拔不？']);
   function enterSelection(s, random) {
-    const m = s.active, pool = [0, 1, 2];
-    if (m.lastRoundWinner !== null) pool.push(m.lastRoundWinner === 1 ? 3 : 4);
+    const m = s.active, pool = [0, 1];
+    if (m.lastRoundWinner !== null) pool.push(m.lastRoundWinner === 1 ? 2 : 3);
     const choices = pool.filter(id => id !== m.tauntID);
     const roll = random(); requireThat(Number.isFinite(roll) && roll >= 0 && roll < 1);
     m.tauntID = choices[Math.floor(roll * choices.length)];

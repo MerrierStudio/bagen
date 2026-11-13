@@ -5,7 +5,18 @@ html{font-size:100%;font:-apple-system-body}
 
 .treatment-ghost{position:fixed;z-index:6;pointer-events:none}.treatment-ghost .sprite{height:100%;margin:0}
 
-.home{overflow-y:auto}.home>*{flex-shrink:0}.collection-grid{grid-template-columns:repeat(auto-fill,minmax(6.25rem,1fr))}
+/* Only content panes scroll; keep the viewport and navigation in place. */
+html,body{overflow:hidden;overscroll-behavior:none}
+body{position:fixed;inset:0}
+#app{height:100%;overflow:hidden}
+.scroll,.treat-middle{overscroll-behavior-y:none}
+.nav,.treatment-title{flex-shrink:0}
+.home{padding-bottom:calc(16px + var(--bottom-inset,env(safe-area-inset-bottom,0px)))}
+.home>*{flex-shrink:0}
+.home-title{font-size:min(4rem,20vw)}
+.home .kids{flex-shrink:1;min-height:0}
+.home .error-text{flex-shrink:1;min-height:0;overflow-y:auto;overscroll-behavior-y:none}
+.collection-grid{grid-template-columns:repeat(auto-fill,minmax(6.25rem,1fr))}
 
 /* The canvas outline and this editable text share selectionLayout geometry. */
 .opponent-taunt{position:absolute;display:flex;align-items:center;justify-content:center;margin:0;line-height:1.45;text-align:center;white-space:pre-line;pointer-events:none}
