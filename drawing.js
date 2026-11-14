@@ -17,8 +17,8 @@
     if(roots.length&&age>=.28&&!reduced){roots.forEach((r,i)=>{const p=starts[i],blend=Math.max(0,Math.min(1,(age-.64)/.58)),x=(ox+p[0]/836*iw)*(1-blend)+w*(i+.5)/3*blend,y=(oy+p[1]/1881*ih-45)*(1-blend)+90*blend;ctx.save();ctx.globalAlpha=Math.min(1,(age-.28)/.2);sprite(ctx,r,x,y,100,((i-1)*13)*(1-blend)*Math.PI/180);ctx.restore();});}
   }
   function selectionLayout(w,h){
-    const scale=Math.min(w/390,h/390,1.15);
-    return {scale:scale,x:(w-280*scale)/2,y:Math.max(12,h*.06),width:280*scale,height:136*scale};
+    const scale=Math.min(w/390*.84,h/390,.96);
+    return {scale:scale,x:(w-280*scale)/2,y:2,width:280*scale,height:136*scale};
   }
   function opponent(ctx,w,h){
     const layout=selectionLayout(w,h),s=layout.scale;
