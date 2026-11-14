@@ -1,0 +1,8 @@
+{
+  "game_version": "web-6ea8088cbde148a5",
+  "source_sha256": "6ea8088cbde148a529068465768594b1d2917a28efffd0c3d84fae26b6410ba8",
+  "target": "browser",
+  "test": false,
+  "analytics_enabled": true,
+  "analytics_environment": "production"
+}
