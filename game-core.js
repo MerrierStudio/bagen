@@ -191,10 +191,11 @@
       r.hasEnteredArchive = true;
     });
     m.settlementApplied = true; m.phase = 'finished';
-    s.pendingCommit = { format: 'bagen-web', schemaVersion: 1, commitID: m.id, roots: mergedRoots(s), rngHex: s.rngHex, nextID: s.nextID };
+    s.pendingCommit = { format: 'bagen-web', schemaVersion: 1, commitID: m.id, playerMatchWins: s.playerMatchWins + Number(m.score[1] === 2), roots: mergedRoots(s), rngHex: s.rngHex, nextID: s.nextID };
   }
   function validateState(s) {
     requireThat(s.schemaVersion === 1 && Array.isArray(s.roots) && unique(s.roots.map(r => r.id)) && Number.isSafeInteger(s.nextID) && s.nextID > 0);
+    requireThat(Number.isSafeInteger(s.playerMatchWins) && s.playerMatchWins >= 0, '累计胜利记录无效，请保留原存档');
     new SeededRandom(s.rngHex); s.roots.forEach(validateRoot);
     if (!s.active) { requireThat(s.pendingCommit === null); return; }
     const m = s.active; m.workingRoots.forEach(validateRoot);
@@ -215,8 +216,8 @@
       const archive = options.archive;
       if (archive) {
         requireThat(archive.format === 'bagen-web' && archive.schemaVersion === 1 && typeof archive.commitID === 'string' && Array.isArray(archive.roots) && archive.roots.every(r => r.hasEnteredArchive), '存档版本无法识别，请保留原记录');
-        this._state = { schemaVersion: 1, roots: copy(archive.roots), rngHex: archive.rngHex, nextID: archive.nextID, active: null, pendingCommit: null, lastCommitID: archive.commitID, paused: false, pauseReason: null, inputEpoch: 0 };
-      } else this._state = { schemaVersion: 1, roots: [], rngHex: new SeededRandom(options.seed).hex, nextID: 1, active: null, pendingCommit: null, lastCommitID: '', paused: false, pauseReason: null, inputEpoch: 0 };
+        this._state = { schemaVersion: 1, playerMatchWins: archive.playerMatchWins === undefined ? 0 : archive.playerMatchWins, roots: copy(archive.roots), rngHex: archive.rngHex, nextID: archive.nextID, active: null, pendingCommit: null, lastCommitID: archive.commitID, paused: false, pauseReason: null, inputEpoch: 0 };
+      } else this._state = { schemaVersion: 1, playerMatchWins: 0, roots: [], rngHex: new SeededRandom(options.seed).hex, nextID: 1, active: null, pendingCommit: null, lastCommitID: '', paused: false, pauseReason: null, inputEpoch: 0 };
       validateState(this._state);
     }
     get revision() { return this._revision; }
@@ -225,7 +226,7 @@
     get collectionRoots() { return collection(this._state.roots); }
     get result() { return this._state.active && this._state.lastCommitID === this._state.active.id ? summary(this._state.active) : null; }
     get pendingCommit() { return copy(this._state.pendingCommit); }
-    archiveSnapshot() { const s = this._state; return copy({ format: 'bagen-web', schemaVersion: 1, commitID: s.lastCommitID, roots: s.roots, rngHex: s.rngHex, nextID: s.nextID }); }
+    archiveSnapshot() { const s = this._state; return copy({ format: 'bagen-web', schemaVersion: 1, commitID: s.lastCommitID, playerMatchWins: s.playerMatchWins, roots: s.roots, rngHex: s.rngHex, nextID: s.nextID }); }
     dispatch(action) {
       requireThat(action && typeof action.type === 'string'); const s = copy(this._state), m = s.active, now = this._now();
       requireThat(Number.isFinite(now));
@@ -243,6 +244,7 @@
       } else if (action.type === 'resume') { s.paused = false; s.pauseReason = null; s.inputEpoch++; }
       else if (action.type === 'commitSucceeded') {
         requireThat(s.pendingCommit && action.commitID === s.pendingCommit.commitID && m && m.id === action.commitID, '提交已过期或已经完成');
+        s.playerMatchWins = s.pendingCommit.playerMatchWins;
         s.roots = copy(s.pendingCommit.roots); s.lastCommitID = action.commitID; s.pendingCommit = null;
       } else {
         requireThat(!s.paused, '本场已暂停，请先继续');

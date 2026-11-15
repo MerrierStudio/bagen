@@ -1,6 +1,6 @@
 {
-  "game_version": "web-6ea8088cbde148a5",
-  "source_sha256": "6ea8088cbde148a529068465768594b1d2917a28efffd0c3d84fae26b6410ba8",
+  "game_version": "web-968675ff1d2c5f71",
+  "source_sha256": "968675ff1d2c5f71c0e4286ec45d8b9b0327ed770707b74bde44ecb296513f72",
   "target": "browser",
   "test": false,
   "analytics_enabled": true,
